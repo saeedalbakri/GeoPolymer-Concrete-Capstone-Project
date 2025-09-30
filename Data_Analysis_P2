@@ -1,0 +1,187 @@
+#"Polymer 2": Flyash F class (Raw material A), Raw material B, Raw material C
+import re
+from pathlib import Path
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Settings
+EXCEL_PATH = "Geo_Polymer_Data.xlsx"
+SHEET_NAME = "Polymer 2" 
+OUT_DIR = Path("reports/figures")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+FIGSIZE        = (7.5, 5)
+FRAME_COLOR    = "black"            # frame (spines)
+TICK_COLOR     = "black"            # tick numbers
+LABEL_COLOR    = "black"            # axis labels
+TITLE_COLOR    = "black"
+POINT_COLOR    = "tab:orange"       # scatter points
+REG_LINE_COLOR = "tab:green"        # regression line
+
+#Helpers
+def flatten_columns(cols):
+    flat = []
+    for c in cols:
+        if isinstance(c, tuple):
+            parts = [str(p) for p in c if p is not None and str(p).strip() and str(p).lower() != "nan"]
+            flat.append(" ".join(parts).strip())
+        else:
+            flat.append("" if c is None else str(c).strip())
+    return pd.Index(flat)
+
+def clean_name(s: str) -> str:
+    s = str(s).replace("\n", " ")
+    s = re.sub(r"Unnamed: *\d+(?:_level_\d+)?", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"level_\d+", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def clean_headers(idx: pd.Index) -> pd.Index:
+    return pd.Index([clean_name(c) for c in idx]).str.strip()
+
+def first_contains(columns, *keywords):
+    """Return first column whose cleaned lowercase name contains all keywords."""
+    for c in columns:
+        lc = clean_name(c).lower()
+        if all(k.lower() in lc for k in keywords):
+            return c
+    return None
+
+def first_regex(columns, pattern):
+    """Return first column whose cleaned name matches regex pattern."""
+    rx = re.compile(pattern, flags=re.IGNORECASE)
+    for c in columns:
+        if rx.search(clean_name(c)):
+            return c
+    return None
+
+def style_axes(ax):
+    ax.title.set_color(TITLE_COLOR)
+    ax.xaxis.label.set_color(LABEL_COLOR)
+    ax.yaxis.label.set_color(LABEL_COLOR)
+    ax.tick_params(axis="x", colors=TICK_COLOR)
+    ax.tick_params(axis="y", colors=TICK_COLOR)
+    for sp in ax.spines.values():
+        sp.set_color(FRAME_COLOR)
+
+def load_polymer2():
+    """Load Polymer 2 robustly (two-row header first, then single-row; fallback to sheet index 2)."""
+    # Try by name with 2-row header
+    try:
+        df = pd.read_excel(EXCEL_PATH, sheet_name=SHEET_NAME, header=[2, 3])
+        df.columns = clean_headers(flatten_columns(df.columns))
+        if df.columns.str.fullmatch(r"\s*").any():
+            raise ValueError("Empty headers after flattening")
+        return df, SHEET_NAME, "header=[2,3]"
+    except Exception:
+        # Fallback: single header row (Excel row 4)
+        try:
+            df = pd.read_excel(EXCEL_PATH, sheet_name=SHEET_NAME, skiprows=3)
+            df.columns = clean_headers(df.columns)
+            return df, SHEET_NAME, "skiprows=3"
+        except Exception:
+            # Final fallback: sheet index 2 (the third sheet)
+            try:
+                df = pd.read_excel(EXCEL_PATH, sheet_name=2, header=[2, 3])
+                df.columns = clean_headers(flatten_columns(df.columns))
+                return df, "index 2", "header=[2,3]"
+            except Exception:
+                df = pd.read_excel(EXCEL_PATH, sheet_name=2, skiprows=3)
+                df.columns = clean_headers(df.columns)
+                return df, "index 2", "skiprows=3"
+
+def pick_targets(df):
+    """Find Y targets in the requested order."""
+    y_ist  = first_contains(df.columns, "initial", "setting", "time")
+    y_fst  = first_contains(df.columns, "final",   "setting", "time")
+    # Strengths with word boundaries (avoids matching 13/17/128, etc.)
+    y_3d   = first_regex(df.columns, r"\b3\b.*\bday(s)?\b")
+    y_7d   = first_regex(df.columns, r"\b7\b.*\bday(s)?\b")
+    y_28d  = first_regex(df.columns, r"\b28\b.*\bday(s)?\b")
+    # Flexural
+    y_flex = first_contains(df.columns, "flexural")
+    return [c for c in [y_ist, y_fst, y_3d, y_7d, y_28d, y_flex] if c is not None]
+
+def plot_against_x(df, x_col, targets, label_x=None):
+    """Make one plot per target vs x_col, with consistent styling and r in top-right."""
+    if x_col is None:
+        raise KeyError("X column is None; cannot plot.")
+    # Numeric coercion
+    df[x_col] = pd.to_numeric(df[x_col], errors="coerce")
+    for c in targets:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    sns.set_context("talk")
+    made_any = False
+    x_label = clean_name(label_x or x_col)
+
+    for y_col in targets:
+        pair = df[[x_col, y_col]].dropna()
+        print(f"\nPair: {clean_name(y_col)} vs {x_label} — rows: {len(pair)}")
+        if pair.empty:
+            print(f"Skipping {y_col}: no numeric rows after cleaning.")
+            continue
+
+        r = float(pair[x_col].corr(pair[y_col]))
+
+        plt.figure(figsize=FIGSIZE)
+        ax = sns.regplot(
+            data=pair, x=x_col, y=y_col, ci=None,
+            scatter_kws={"s": 40, "color": POINT_COLOR},
+            line_kws={"color": REG_LINE_COLOR, "linewidth": 2}
+        )
+        ax.set_title(f"{clean_name(y_col)} vs {x_label}", color=TITLE_COLOR)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(clean_name(y_col))
+        style_axes(ax)
+
+        # r-value at top-right inside the frame
+        ax.text(
+            0.98, 0.98, f"R = {r:.3f}",
+            transform=ax.transAxes, ha="right", va="top",
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.85, edgecolor=FRAME_COLOR)
+        )
+
+        plt.tight_layout()
+        # Include X name in filename to avoid overwrites
+        x_tag = re.sub(r'[^A-Za-z0-9_.-]+','_', x_label)
+        y_tag = re.sub(r'[^A-Za-z0-9_.-]+','_', clean_name(y_col))
+        out_path = OUT_DIR / f"{y_tag}_vs_{x_tag}.png"
+        plt.savefig(out_path, dpi=150)
+        plt.show()
+        print(f"Saved: {out_path}")
+        made_any = True
+
+    if not made_any:
+        print("No plots rendered for this X (all pairs empty after cleaning).")
+
+#Load once 
+df, which_sheet, how = load_polymer2()
+print(f"Loaded from sheet: {which_sheet} using {how}")
+print("Detected columns:")
+for i, c in enumerate(df.columns):
+    print(f"{i:>2}: {c}")
+
+#Pick targets once
+targets = pick_targets(df)
+if not targets:
+    raise RuntimeError("No targets found. Check the detected columns and adjust the matching rules.")
+
+print("\nY targets chosen:", [clean_name(t) for t in targets])
+
+# Run for each X
+# X1: Flyash F class
+x_flyash = first_contains(df.columns, "flyash", "class") or ("Flyash F class" if "Flyash F class" in df.columns else None)
+print("\n=== Plotting with X = Flyash F class ===")
+plot_against_x(df, x_flyash, targets, label_x="Flyash F class")
+
+# X2: Raw material B
+x_rawB = first_contains(df.columns, "raw", "material", "b") or ("Raw material B" if "Raw material B" in df.columns else None)
+print("\n=== Plotting with X = Raw material B ===")
+plot_against_x(df, x_rawB, targets, label_x="Raw material B")
+
+# X3: Raw material C
+x_rawC = first_contains(df.columns, "raw", "material", "c") or ("Raw material C" if "Raw material C" in df.columns else None)
+print("\n=== Plotting with X = Raw material C ===")
+plot_against_x(df, x_rawC, targets, label_x="Raw material C")
