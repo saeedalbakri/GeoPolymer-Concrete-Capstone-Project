@@ -33,6 +33,7 @@ Example
 strong: |r| ≥ 0.70
 moderate: 0.30 ≤ |r| < 0.70
 weak: |r| < 0.30
+
 ------------------------------------------------------------------
 increases: r > 0 → as the input goes up, the output tends to go up.
 reduces: r < 0 → as the input goes up, the output tends to go down.
