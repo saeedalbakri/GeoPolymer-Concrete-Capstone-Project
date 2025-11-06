@@ -85,13 +85,23 @@ def map_columns(df: pd.DataFrame):
 
 #DT hyperparameters
 DT_defaults = dict(random_state=random_state)
+#DT_grid = {
+#    "max_depth":         [3, 4, 5, 6, 8, None],
+#    "min_samples_split": [2, 4, 6, 8, 12, 16],
+#    "min_samples_leaf":  [1, 2, 3, 5, 8],
+#    "ccp_alpha":         [0.0, 1e-4, 5e-4, 1e-3, 2e-3],
+#}
+
 DT_grid = {
-    "max_depth":         [3, 4, 5, 6, 8, None],
-    "min_samples_split": [2, 4, 6, 8, 12, 16],
-    "min_samples_leaf":  [1, 2, 3, 5, 8],
-    "ccp_alpha":         [0.0, 1e-4, 5e-4, 1e-3, 2e-3],
+    "max_depth":         [8, 12, 16, 20, None],  #deeper trees
+    "min_samples_split": [2, 3, 4, 6], #smaller splits
+    "min_samples_leaf":  [1, 2], #smaller leave
+    "ccp_alpha":         [0.0],  #no cost-complexity pruning
 }
 min_rows_for_grid = 20
+
+ADD_TRAIN_NOISE = True
+NOISE_FRAC = 0.005
 
 #helpers
 def to_numeric(df, cols):
