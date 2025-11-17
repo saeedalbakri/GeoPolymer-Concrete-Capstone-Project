@@ -146,6 +146,14 @@ def fill_target(df, X_cols, y_col):
 
     Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=test_split, random_state=random_state)
 
+    Xtr_fit = Xtr.copy()
+    if ADD_TRAIN_NOISE and Xtr_fit.shape[0] >= 2:
+        rng = np.random.default_rng(seed=random_state)
+        std = Xtr_fit.std(axis = 0, ddof = 0)
+        std[std == 0.0] = 1.0
+        noise = rng.normal(loc = 0.0, scale = NOISE_FRAC * std, size = Xtr_fit.shape)
+        Xtr_fit = Xtr_fit + noise
+
     if len(ytr) >= min_rows_for_grid:
         k = max(2, min(5, len(ytr)))
         cv = KFold(n_splits=k, shuffle=True, random_state=random_state)
