@@ -144,26 +144,41 @@ def fill_target(df, X_cols, y_col):
     X = df.loc[have, X_cols].values
     y = df.loc[have, y_col].values
 
-    Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=test_split, random_state=random_state)
+    Xtr, Xte, ytr, yte = train_test_split(
+        X, y, test_size=test_split, random_state=random_state
+    )
 
+    #copy training data and optionally add noise
     Xtr_fit = Xtr.copy()
     if ADD_TRAIN_NOISE and Xtr_fit.shape[0] >= 2:
         rng = np.random.default_rng(seed=random_state)
-        std = Xtr_fit.std(axis = 0, ddof = 0)
+        std = Xtr_fit.std(axis=0, ddof=0)
         std[std == 0.0] = 1.0
-        noise = rng.normal(loc = 0.0, scale = NOISE_FRAC * std, size = Xtr_fit.shape)
+        noise = rng.normal(
+            loc=0.0,
+            scale=NOISE_FRAC * std,
+            size=Xtr_fit.shape
+        )
         Xtr_fit = Xtr_fit + noise
 
+    # use Xtr_fit (possibly noisy) when fitting
     if len(ytr) >= min_rows_for_grid:
         k = max(2, min(5, len(ytr)))
         cv = KFold(n_splits=k, shuffle=True, random_state=random_state)
         base = DecisionTreeRegressor(**DT_defaults)
-        gs = GridSearchCV(base, DT_grid, scoring="neg_mean_squared_error", cv=cv, n_jobs=-1, refit=True)
-        gs.fit(Xtr, ytr)
+        gs = GridSearchCV(
+            base,
+            DT_grid,
+            scoring="neg_mean_squared_error",
+            cv=cv,
+            n_jobs=-1,
+            refit=True,
+        )
+        gs.fit(Xtr_fit, ytr)
         model = gs.best_estimator_
         stats["used_grid"] = True
     else:
-        model = DecisionTreeRegressor(**DT_defaults).fit(Xtr, ytr)
+        model = DecisionTreeRegressor(**DT_defaults).fit(Xtr_fit, ytr)
 
     yhat = model.predict(Xte)
     stats["r2_test"]  = float(r2_score(yte, yhat))
@@ -171,10 +186,25 @@ def fill_target(df, X_cols, y_col):
     stats["rmse_test"]= float(np.sqrt(mean_squared_error(yte, yhat)))
 
     if need.any():
-        preds = model.predict(df.loc[need, X_cols].values)
+        X_need = df.loc[need, X_cols].values
+        preds = model.predict(X_need)
+
+        #tiny jitter so each prediction is slightly different
+        n = preds.shape[0]
+        if n > 1:
+            rng = np.random.default_rng(seed=random_state)
+            base_scale = np.std(preds) if np.std(preds) > 0 else 1.0
+            jitter = rng.normal(
+                loc=0.0,
+                scale=NOISE_FRAC * base_scale,
+                size=n
+            )
+            preds = preds + jitter
+
         out.loc[need] = preds
 
     return nice_round(out, y_col), stats
+
 
 #main
 def main():
